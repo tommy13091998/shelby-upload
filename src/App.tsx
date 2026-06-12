@@ -166,6 +166,12 @@ function App() {
     }
   }, [aptosConnected, aptosAccount, aptosWallet]);
 
+  // Fallback state for wallets that fail to connect (e.g. extension not found)
+  const [connectionErrorWallet, setConnectionErrorWallet] = useState<'petra' | 'metamask' | 'okx' | null>(null);
+  
+  // Mobile browser detection
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
   // Modal states
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -230,6 +236,7 @@ function App() {
         const state = await ShelbyService.connect(walletType, true);
         setWallet(state);
         setIsWalletModalOpen(false);
+        setConnectionErrorWallet(null);
         showToast(`Connected to ${walletType.toUpperCase()} wallet (Demo Mode) successfully!`, 'success');
       } catch (err: any) {
         showToast(err.message || 'Demo connection failed.', 'error');
@@ -243,6 +250,7 @@ function App() {
         if (petra) {
           await aptosConnect((petra as any).name);
           setIsWalletModalOpen(false);
+          setConnectionErrorWallet(null);
         } else {
           throw new Error('Petra Wallet not found. Please install the Petra browser extension.');
         }
@@ -251,6 +259,7 @@ function App() {
         if (okx) {
           await aptosConnect((okx as any).name);
           setIsWalletModalOpen(false);
+          setConnectionErrorWallet(null);
         } else {
           throw new Error('OKX Wallet not found. Please install the OKX browser extension.');
         }
@@ -258,11 +267,23 @@ function App() {
         const state = await ShelbyService.connect('metamask', false);
         setWallet(state);
         setIsWalletModalOpen(false);
+        setConnectionErrorWallet(null);
         showToast('Connected to MetaMask successfully!', 'success');
       }
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || 'Wallet connection failed.', 'error');
+      const errMsg = (err.message || '').toLowerCase();
+      if (
+        errMsg.includes('not found') || 
+        errMsg.includes('install') || 
+        errMsg.includes('extension') || 
+        errMsg.includes('no accounts') ||
+        isMobile
+      ) {
+        setConnectionErrorWallet(walletType);
+      } else {
+        showToast(err.message || 'Wallet connection failed.', 'error');
+      }
     }
   };
 
@@ -517,6 +538,32 @@ function App() {
   const totalStorage = files.reduce((acc, file) => acc + file.size, 0);
   const privateCount = files.filter(f => f.isPrivate).length;
   const publicCount = files.filter(f => !f.isPrivate).length;
+
+  // Helper to get native wallet app deep link
+  const getWalletDeepLink = (walletType: 'petra' | 'metamask' | 'okx') => {
+    const currentUrl = window.location.href;
+    if (walletType === 'metamask') {
+      const cleanHost = window.location.host;
+      const cleanPath = window.location.pathname;
+      const cleanHash = window.location.hash;
+      return `https://metamask.app.link/dapp/${cleanHost}${cleanPath}${cleanHash}`;
+    }
+    if (walletType === 'okx') {
+      return `https://www.okx.com/download?deeplink=${encodeURIComponent('okx://wallet/dapp/details?dappUrl=' + encodeURIComponent(currentUrl))}`;
+    }
+    if (walletType === 'petra') {
+      return `https://petra.app/download?link=${encodeURIComponent(currentUrl)}`;
+    }
+    return '#';
+  };
+
+  // Helper to get friendly wallet name
+  const getWalletName = (walletType: 'petra' | 'metamask' | 'okx') => {
+    if (walletType === 'petra') return 'Petra Wallet';
+    if (walletType === 'metamask') return 'MetaMask';
+    if (walletType === 'okx') return 'OKX Wallet';
+    return '';
+  };
 
   return (
     <div style={{ position: 'relative', minHeight: '100%' }}>
@@ -1058,15 +1105,15 @@ function App() {
 
       {/* Wallet Connection Modal */}
       {isWalletModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsWalletModalOpen(false)}>
+        <div className="modal-overlay" onClick={() => { setIsWalletModalOpen(false); setConnectionErrorWallet(null); }}>
           <div className="glass modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 style={{ fontSize: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Wallet size={20} style={{ color: 'var(--accent-purple)' }} />
-                Connect Your Wallet
+                {connectionErrorWallet ? 'Connection Fallback' : 'Connect Your Wallet'}
               </h3>
               <button 
-                onClick={() => setIsWalletModalOpen(false)}
+                onClick={() => { setIsWalletModalOpen(false); setConnectionErrorWallet(null); }}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -1078,56 +1125,177 @@ function App() {
               </button>
             </div>
 
-            <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '-8px' }}>
-              Shelby Upload connects to your wallet to securely sign storage transactions and decrypt private files.
-            </p>
+            {connectionErrorWallet ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'center' }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '16px',
+                  backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                  color: 'var(--accent-rose)',
+                  margin: '0 auto'
+                }}>
+                  <AlertCircle size={36} />
+                </div>
+                <div>
+                  <h4 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {getWalletName(connectionErrorWallet)} Not Detected
+                  </h4>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '8px', lineHeight: '1.6' }}>
+                    {isMobile 
+                      ? `To connect your real wallet on mobile, you can open this site in the ${getWalletName(connectionErrorWallet)} app's built-in DApp browser, or use Demo Mode for instant simulated access.` 
+                      : `The wallet extension is not installed or detected in your browser. Install the extension or connect via Demo Mode for simulated testing.`
+                    }
+                  </p>
+                </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {/* Petra Wallet */}
-              <div className="wallet-option" onClick={() => handleConnect('petra', false)}>
-                <div className="wallet-option-details">
-                  <img 
-                    src={getWalletIcon('petra')} 
-                    alt="Petra" 
-                    style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'contain', background: '#0e1017', padding: '4px', border: '1px solid var(--border-color)' }} 
-                  />
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '14px' }}>Petra Wallet</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Connect to official Petra Aptos wallet</div>
-                  </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
+                  <a 
+                    href={getWalletDeepLink(connectionErrorWallet)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      padding: '12px'
+                    }}
+                  >
+                    <ExternalLink size={16} />
+                    {isMobile ? `Open in ${getWalletName(connectionErrorWallet)} App` : `Get ${getWalletName(connectionErrorWallet)}`}
+                  </a>
+
+                  <button 
+                    className="btn btn-secondary"
+                    onClick={() => handleConnect(connectionErrorWallet, true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      padding: '12px',
+                      borderColor: 'var(--accent-purple)',
+                      background: 'rgba(139, 92, 246, 0.05)'
+                    }}
+                  >
+                    <ShieldCheck size={16} style={{ color: 'var(--accent-purple)' }} />
+                    Use Demo Mode (Simulated Wallet)
+                  </button>
+
+                  <button 
+                    className="btn btn-secondary"
+                    onClick={() => setConnectionErrorWallet(null)}
+                    style={{ padding: '12px', marginTop: '4px' }}
+                  >
+                    Back to Wallet List
+                  </button>
                 </div>
               </div>
+            ) : (
+              <>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '-8px' }}>
+                  Shelby Upload connects to your wallet to securely sign storage transactions and decrypt private files.
+                </p>
 
-              {/* MetaMask Wallet */}
-              <div className="wallet-option" onClick={() => handleConnect('metamask', false)}>
-                <div className="wallet-option-details">
-                  <img 
-                    src={getWalletIcon('metamask')} 
-                    alt="MetaMask" 
-                    style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'contain', background: '#0e1017', padding: '2px', border: '1px solid var(--border-color)' }} 
-                  />
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '14px' }}>MetaMask</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Connect via DAA (EVM)</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {isMobile && (
+                    <div style={{
+                      padding: '10px 14px',
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(6, 182, 212, 0.08)',
+                      border: '1px solid rgba(6, 182, 212, 0.2)',
+                      fontSize: '12px',
+                      color: 'var(--accent-cyan)',
+                      lineHeight: '1.5',
+                      marginBottom: '4px'
+                    }}>
+                      <strong>Tip:</strong> Tap a wallet option to launch its mobile app browser, or choose <strong>Demo Mode</strong> below for instant simulated access without downloading any app.
+                    </div>
+                  )}
+
+                  {/* Petra Wallet */}
+                  <div className="wallet-option" onClick={() => handleConnect('petra', false)}>
+                    <div className="wallet-option-details">
+                      <img 
+                        src={getWalletIcon('petra')} 
+                        alt="Petra" 
+                        style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'contain', background: '#0e1017', padding: '4px', border: '1px solid var(--border-color)' }} 
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px' }}>Petra Wallet</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Connect to official Petra Aptos wallet</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* MetaMask Wallet */}
+                  <div className="wallet-option" onClick={() => handleConnect('metamask', false)}>
+                    <div className="wallet-option-details">
+                      <img 
+                        src={getWalletIcon('metamask')} 
+                        alt="MetaMask" 
+                        style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'contain', background: '#0e1017', padding: '2px', border: '1px solid var(--border-color)' }} 
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px' }}>MetaMask</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Connect via DAA (EVM)</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* OKX Wallet */}
+                  <div className="wallet-option" onClick={() => handleConnect('okx', false)}>
+                    <div className="wallet-option-details">
+                      <img 
+                        src={getWalletIcon('okx')} 
+                        alt="OKX" 
+                        style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'contain', background: '#000', padding: '4px', border: '1px solid var(--border-color)' }} 
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px' }}>OKX Wallet</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Connect to multi-chain OKX wallet</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Demo Mode / Simulated Wallet */}
+                  <div 
+                    className="wallet-option" 
+                    onClick={() => handleConnect('petra', true)}
+                    style={{ 
+                      borderColor: 'var(--accent-purple)',
+                      background: 'rgba(139, 92, 246, 0.05)',
+                      boxShadow: '0 0 10px rgba(139, 92, 246, 0.15)'
+                    }}
+                  >
+                    <div className="wallet-option-details">
+                      <div style={{ 
+                        width: '36px', 
+                        height: '36px', 
+                        borderRadius: '8px', 
+                        background: 'rgba(139, 92, 246, 0.15)', 
+                        color: 'var(--accent-purple)', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        border: '1px solid rgba(139, 92, 246, 0.3)'
+                      }}>
+                        <ShieldCheck size={20} />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', color: '#fff' }}>Demo Mode (Simulated Wallet)</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Instant access without extensions or app downloads</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-
-              {/* OKX Wallet */}
-              <div className="wallet-option" onClick={() => handleConnect('okx', false)}>
-                <div className="wallet-option-details">
-                  <img 
-                    src={getWalletIcon('okx')} 
-                    alt="OKX" 
-                    style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'contain', background: '#000', padding: '4px', border: '1px solid var(--border-color)' }} 
-                  />
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '14px' }}>OKX Wallet</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Connect to multi-chain OKX wallet</div>
-                  </div>
-                </div>
-              </div>
-            </div>
+              </>
+            )}
           </div>
         </div>
       )}
